@@ -1,6 +1,6 @@
 import logging
 
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import SQLAlchemyError
 
 from wxcloudrun import db
 from wxcloudrun.model import Counters
@@ -17,8 +17,8 @@ def query_counterbyid(id):
     """
     try:
         return Counters.query.filter(Counters.id == id).first()
-    except OperationalError as e:
-        logger.info("query_counterbyid errorMsg= {} ".format(e))
+    except SQLAlchemyError as e:
+        logger.error("query_counterbyid errorMsg= {} ".format(e))
         return None
 
 
@@ -33,8 +33,9 @@ def delete_counterbyid(id):
             return
         db.session.delete(counter)
         db.session.commit()
-    except OperationalError as e:
-        logger.info("delete_counterbyid errorMsg= {} ".format(e))
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        logger.error("delete_counterbyid errorMsg= {} ".format(e))
 
 
 def insert_counter(counter):
@@ -45,20 +46,38 @@ def insert_counter(counter):
     try:
         db.session.add(counter)
         db.session.commit()
-    except OperationalError as e:
-        logger.info("insert_counter errorMsg= {} ".format(e))
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        logger.error("insert_counter errorMsg= {} ".format(e))
 
 
 def update_counterbyid(counter):
     """
-    根据ID更新counter的值
-    :param counter实体
+    提交对counter实体的修改
+    :param counter: Counters实体
     """
     try:
-        counter = query_counterbyid(counter.id)
-        if counter is None:
-            return
-        db.session.flush()
+        db.session.add(counter)
         db.session.commit()
-    except OperationalError as e:
-        logger.info("update_counterbyid errorMsg= {} ".format(e))
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        logger.error("update_counterbyid errorMsg= {} ".format(e))
+
+
+def increase_counterbyid(id):
+    """
+    在数据库层面原子地将计数加1，避免并发请求时计数丢失
+    :param id: Counter的ID
+    :return: 加1后的Counter实体；记录不存在或出错时返回None
+    """
+    try:
+        updated = Counters.query.filter(Counters.id == id).update(
+            {Counters.count: Counters.count + 1}, synchronize_session=False)
+        db.session.commit()
+        if updated == 0:
+            return None
+        return query_counterbyid(id)
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        logger.error("increase_counterbyid errorMsg= {} ".format(e))
+        return None
