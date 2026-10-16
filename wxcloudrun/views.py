@@ -1,7 +1,6 @@
-from datetime import datetime
 from flask import render_template, request
-from run import app
-from wxcloudrun.dao import delete_counterbyid, query_counterbyid, insert_counter, update_counterbyid
+from wxcloudrun import app
+from wxcloudrun.dao import delete_counterbyid, query_counterbyid, insert_counter, increase_counterbyid
 from wxcloudrun.model import Counters
 from wxcloudrun.response import make_succ_empty_response, make_succ_response, make_err_response
 
@@ -21,10 +20,10 @@ def count():
     """
 
     # 获取请求体参数
-    params = request.get_json()
+    params = request.get_json(silent=True)
 
-    # 检查action参数
-    if 'action' not in params:
+    # 检查action参数（请求体不是合法JSON对象时也视为缺少参数）
+    if not isinstance(params, dict) or 'action' not in params:
         return make_err_response('缺少action参数')
 
     # 按照不同的action的值，进行不同的操作
@@ -32,19 +31,13 @@ def count():
 
     # 执行自增操作
     if action == 'inc':
-        counter = query_counterbyid(1)
+        counter = increase_counterbyid(1)
         if counter is None:
-            counter = Counters()
-            counter.id = 1
-            counter.count = 1
-            counter.created_at = datetime.now()
-            counter.updated_at = datetime.now()
+            counter = Counters(id=1, count=1)
             insert_counter(counter)
-        else:
-            counter.id = 1
-            counter.count += 1
-            counter.updated_at = datetime.now()
-            update_counterbyid(counter)
+            counter = query_counterbyid(1)
+        if counter is None:
+            return make_err_response('计数失败，请稍后重试')
         return make_succ_response(counter.count)
 
     # 执行清0操作
@@ -62,5 +55,5 @@ def get_count():
     """
     :return: 计数的值
     """
-    counter = Counters.query.filter(Counters.id == 1).first()
+    counter = query_counterbyid(1)
     return make_succ_response(0) if counter is None else make_succ_response(counter.count)
